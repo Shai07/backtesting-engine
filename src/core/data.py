@@ -102,7 +102,7 @@ class OptionsDataLoader(DataLoader):
                 None
             )
             chunk[self.exdate_col] = pd.to_datetime(
-            chunk[self.exdate_col]
+                chunk[self.exdate_col]
             ).dt.tz_localize(None)
 
             buffer = pd.concat([buffer, chunk], ignore_index=True)
@@ -130,6 +130,10 @@ class OptionsDataLoader(DataLoader):
 
 
 class MultiDataLoader:
+    """
+    Reader for multiple data loaders - enables concurrent data streams
+    """
+
     def __init__(self, loaders: dict[str, DataLoader], start_date=None, end_date=None):
         self.loaders = loaders
         self.start_date = (

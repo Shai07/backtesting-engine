@@ -38,6 +38,9 @@ class Portfolio:
         return greek_exposure_map
 
     def update_equities(self, equity_orders: pd.DataFrame | None):
+        """
+        Update current equity positions to market
+        """
         if equity_orders is None:
             return
 
@@ -74,6 +77,9 @@ class Portfolio:
             self.equities = merged.drop(columns="spot_new")
 
     def update_options(self, option_orders: pd.DataFrame | None):
+        """
+        Update current options positions to market
+        """
         if option_orders is None:
             return
 
@@ -101,6 +107,9 @@ class Portfolio:
             ]
 
     def handle_expired_options(self, current_date: pd.Timestamp):
+        """
+        Calculate PnL for expired options positions and remove from portfolio
+        """
         if self.options.empty:
             return
 
@@ -134,9 +143,6 @@ class Portfolio:
             self.options = self.options.reset_index(drop=True)
 
     def get_delta_exposure(self):
-        """
-        TEMPORARY DELTA EXPOSURE IMPLEMENTATION
-        """
         return self.options["delta"].sum()
 
     def update_delta_pnl(
@@ -148,7 +154,7 @@ class Portfolio:
         spread_std: float,
     ):
         """
-        TEMPORARY DELTA HEDGING IMPLEMENTATION
+        Synthetic delta hedging PnL implementation
         """
         if self.options.empty:
             if self.shares_owned != 0:
