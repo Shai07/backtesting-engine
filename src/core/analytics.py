@@ -42,7 +42,7 @@ class AnalyticsEngine:
         df["daily_return"] = df["market_value"].pct_change()
 
         # First day returns
-        if self.initial_cash > 0:  # Guard against division by zero
+        if self.initial_cash > 0:
             first_day_return = (
                 df["market_value"].iloc[0] - self.initial_cash
             ) / self.initial_cash
@@ -77,7 +77,7 @@ class AnalyticsEngine:
         if downside_volatility != 0:
             sortino_ratio = (annualized_return - risk_free_rate) / downside_volatility
         else:
-            sortino_ratio = np.inf  # Or some large number if no downside volatility
+            sortino_ratio = np.inf
 
         # Historical VaR at 99% confidence level
         historical_var = -daily_returns.quantile(0.01)
