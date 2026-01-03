@@ -1,6 +1,6 @@
 # Options Backtesting Engine
 
-Python-based modular and event-driven backtesting framework for the simulation and evaluation of systematic options trading strategies on historical datasets.
+Python-based modular and event-driven backtesting framework for the simulation of systematic options trading strategies on historical datasets.
 
 ## Main Features:
 
