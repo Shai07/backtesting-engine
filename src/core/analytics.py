@@ -37,38 +37,32 @@ class AnalyticsEngine:
 
         df = pd.DataFrame(self.daily_metrics).set_index("date")
 
-        # Daily returns
         df["market_value"] = pd.to_numeric(df["market_value"], errors="coerce")
         df["daily_return"] = df["market_value"].pct_change()
 
-        # First day returns
         if self.initial_cash > 0:
             first_day_return = (
                 df["market_value"].iloc[0] - self.initial_cash
             ) / self.initial_cash
             df.loc[df.index[0], "daily_return"] = first_day_return
 
-        # Clean daily returns - remove NaN and inf values
+        # Clean daily returns
         daily_returns = df["daily_return"].replace([np.inf, -np.inf], np.nan).dropna()
 
-        # Cumulative Returns
+        # Calculate metrics
         cumulative_return = (daily_returns + 1).prod().item() - 1
 
-        # Annualized Returns and Volatility
         annualized_return = daily_returns.mean() * annualized_days
         annualized_volatility = daily_returns.std() * np.sqrt(annualized_days)
 
-        # Sharpe Ratio
         sharpe_ratio = (annualized_return - risk_free_rate) / annualized_volatility
 
-        # Maximum Drawdown
         df["cumulative_peak"] = df["market_value"].cummax()
         df["drawdown"] = (df["market_value"] - df["cumulative_peak"]) / df[
             "cumulative_peak"
         ]
         max_drawdown = df["drawdown"].min()
 
-        # Downside returns and Sortino Ratio
         downside_returns = daily_returns[
             daily_returns < risk_free_rate / annualized_days
         ]
@@ -79,10 +73,8 @@ class AnalyticsEngine:
         else:
             sortino_ratio = np.inf
 
-        # Historical VaR at 99% confidence level
         historical_var = -daily_returns.quantile(0.01)
 
-        # Final report
         report_data = {
             "Start Date": df.index[0].date(),
             "End Date": df.index[-1].date(),
