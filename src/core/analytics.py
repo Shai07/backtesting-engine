@@ -15,7 +15,7 @@ class AnalyticsEngine:
         Called daily by the BacktestEngine to record daily portfolio metrics
         """
 
-        current_market_value = portfolio.get_market_value()
+        current_market_value = portfolio.get_net_asset_value() + portfolio.get_cash()
         current_delta_exposure = portfolio.get_delta_exposure()
 
         self.daily_metrics.append(
