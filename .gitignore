@@ -214,3 +214,4 @@ __marimo__/
 # Misc
 data/
 backtests/
+test.py

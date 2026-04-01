@@ -1,7 +1,6 @@
 # src/core/constants.py
 
 OPTION_COLUMNS = [
-    "action",
     "quantity",
     "spot",
     "secid",

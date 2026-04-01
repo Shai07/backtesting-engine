@@ -90,11 +90,11 @@ class VolatilityCarry(Strategy):
         active_positions = len(options_positions)
         slots_remaining = max(0, self.max_positions - active_positions)
         for _, option_row in update_rows.iterrows():
-            orders.append(self.create_option_order("UPDATE", 1, close, option_row))
+            orders.append(self.create_option_order(0, close, option_row))
         for _, option_row in sell_rows.iterrows():
             if slots_remaining <= 0:
                 break
-            orders.append(self.create_option_order("SELL", 1, close, option_row))
+            orders.append(self.create_option_order(-1, close, option_row))
             slots_remaining -= 1
 
         return pd.DataFrame(orders) if orders else None

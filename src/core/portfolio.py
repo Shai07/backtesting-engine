@@ -9,7 +9,8 @@ class Portfolio:
     def __init__(self, initial_cash: float):
         self.options = pd.DataFrame(columns=OPTION_COLUMNS)
         self.equities = pd.DataFrame(columns=EQUITY_COLUMNS)
-        self.market_value = initial_cash
+        self.net_asset_value = 0
+        self.cash = initial_cash
 
         self.shares_owned = 0
 
@@ -19,8 +20,11 @@ class Portfolio:
     def get_equities(self):
         return self.equities
 
-    def get_market_value(self):
-        return self.market_value
+    def get_net_asset_value(self):
+        return self.net_asset_value
+
+    def get_cash(self):
+        return self.cash
 
     def get_greek_exposure(self, greek: str) -> dict[str, float]:
         if self.options.empty:
@@ -44,13 +48,19 @@ class Portfolio:
         if equity_orders is None:
             return
 
-        buy_orders = equity_orders[equity_orders["action"] == "BUY"]
-        sell_orders = equity_orders[equity_orders["action"] == "SELL"]
-        update_orders = equity_orders[equity_orders["action"] == "UPDATE"]
+        buy_orders = equity_orders[equity_orders["quantity"] > 0]
+        sell_orders = equity_orders[equity_orders["quantity"] < 0]
+        update_orders = equity_orders[equity_orders["quantity"] == 0]
 
         # Calculate and process net premium / allocation
-        self.market_value -= (buy_orders["spot"] * buy_orders["quantity"]).sum()
-        self.market_value += (sell_orders["spot"] * sell_orders["quantity"]).sum()
+        long_value = (buy_orders["spot"] * buy_orders["quantity"]).sum()
+        short_value = (sell_orders["spot"] * sell_orders["quantity"]).sum()
+
+        self.net_asset_value += long_value
+        self.net_asset_value -= short_value
+
+        self.cash -= long_value
+        self.cash += short_value
 
         # Add positions to portfolio
         self.equities = pd.concat(
@@ -68,7 +78,7 @@ class Portfolio:
             mask = merged["spot_new"].notna()
 
             # Adjust portfolio market value according to changes in spot
-            self.market_value += (
+            self.net_asset_value += (
                 (merged.loc[mask, "spot_new"] - merged.loc[mask, "spot"])
                 * merged.loc[mask, "quantity"]
             ).sum()
@@ -83,14 +93,14 @@ class Portfolio:
         if option_orders is None:
             return
 
-        buy_orders = option_orders[option_orders["action"] == "BUY"]
-        sell_orders = option_orders[option_orders["action"] == "SELL"]
-        update_orders = option_orders[option_orders["action"] == "UPDATE"]
+        buy_orders = option_orders[option_orders["quantity"] > 0]
+        sell_orders = option_orders[option_orders["quantity"] < 0]
+        update_orders = option_orders[option_orders["quantity"] == 0]
 
         # Calculate and process net premium / allocation
         buy_mid_prices = -(buy_orders["best_bid"] + buy_orders["best_offer"]) / 2
         sell_mid_prices = (sell_orders["best_bid"] + sell_orders["best_offer"]) / 2
-        self.market_value += 100 * (sell_mid_prices.sum() + buy_mid_prices.sum())
+        self.cash += 100 * (sell_mid_prices.sum() + buy_mid_prices.sum())
 
         # Add positions to portfolio
         self.options = pd.concat([self.options, sell_orders], ignore_index=True)
@@ -100,11 +110,24 @@ class Portfolio:
             self.options = self.options.set_index("optionid", drop=False)
             update_orders = update_orders.set_index("optionid", drop=False)
 
-            cols_to_update = self.options.columns.difference(["action", "exdate"])
+            cols_to_update = self.options.columns.difference(["exdate"])
 
             self.options.loc[update_orders.index, cols_to_update] = update_orders[
                 cols_to_update
             ]
+
+            update_long_orders = update_orders[update_orders["quantity"] > 0]
+            update_short_orders = update_orders[update_orders["quantity"] < 0]
+
+            update_long_mid_prices = (
+                update_long_orders["best_bid"] + update_long_orders["best_offer"] / 2
+            )
+            update_short_mid_prices = (
+                update_short_orders["best_bid"] + update_short_orders["best_offer"]
+            ) / 2
+            self.net_asset_value += 100 * (
+                update_long_mid_prices.sum() + update_short_mid_prices.sum()
+            )
 
     def handle_expired_options(self, current_date: pd.Timestamp):
         """
@@ -132,49 +155,35 @@ class Portfolio:
                 )
                 * 100
             )
-            sign = np.where(expired_options["action"] == "BUY", 1, -1)
+            sign = np.where(expired_options["quantity"] > 0, 1, -1)
 
             # Adjust market value
             pnl_adjustments = intrinsic_values * sign
-            self.market_value += pnl_adjustments.sum()
+            self.cash += pnl_adjustments.sum()
 
             # Drop expired options
             self.options = self.options.loc[~expired_mask]
             self.options = self.options.reset_index(drop=True)
 
     def get_delta_exposure(self):
-        return self.options["delta"].sum()
+        return self.options["delta"].sum() + self.shares_owned
 
-    def update_delta_pnl(
+    def hedge_delta(
         self,
         spot: float,
-        dS: float,
         commission_per_share: float,
         base_spread: float,
         spread_std: float,
     ):
         """
-        Synthetic delta hedging PnL implementation
+        Synthetic delta hedging implementation
         """
-        if self.options.empty:
-            if self.shares_owned != 0:
-                self.market_value += self.shares_owned * dS
-            return
+        net_delta = self.get_delta_exposure()
+        trade_qty = -round(net_delta, 0)
 
-        if self.shares_owned != 0:
-            self.market_value += self.shares_owned * dS
+        self.shares_owned += trade_qty
+        self.cash -= trade_qty * spot
 
-        target_delta_shares = int(round(self.get_delta_exposure()))
-        net_trade = target_delta_shares - self.shares_owned
-
-        trade_qty = abs(net_trade)
-
-        trade_cashflow = net_trade * spot
-        self.market_value -= trade_cashflow
-
-        spread = base_spread + np.random.normal(0, spread_std)
-        spread = max(spread, 0)
-        transaction_cost = trade_qty * (commission_per_share + spread)
-        self.market_value -= transaction_cost
-
-        self.shares_owned = target_delta_shares
+        spread = max(base_spread + np.random.normal(0, spread_std), 0)
+        transaction_cost = abs(trade_qty) * (commission_per_share + (spread / 2))
+        self.cash -= transaction_cost
