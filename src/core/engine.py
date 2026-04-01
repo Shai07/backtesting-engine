@@ -27,7 +27,6 @@ class BacktestEngine:
     ):
 
         multi_data_loader = MultiDataLoader(self.data_loaders, start_date, end_date)
-        prev_close = 0.0
 
         for date, market_data in multi_data_loader.daily_multi_stream():
             ohlc_data = market_data.get("ohlc")
@@ -48,16 +47,13 @@ class BacktestEngine:
                 self.portfolio.update_options(option_orders)
                 self.portfolio.update_equities(equity_orders)
 
-                if delta_hedging and prev_close != 0.0:
-                    self.portfolio.update_delta_pnl(
+                if delta_hedging:
+                    self.portfolio.hedge_delta(
                         close,
-                        dS=close - prev_close,
                         commission_per_share=0.01,
                         base_spread=0.005,
                         spread_std=0.001,
                     )
-
-            prev_close = close
 
             # Record daily performance
             self.analytics.record_day(date, self.portfolio)

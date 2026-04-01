@@ -168,34 +168,22 @@ class Portfolio:
     def get_delta_exposure(self):
         return self.options["delta"].sum() + self.shares_owned
 
-    def update_delta_pnl(
+    def hedge_delta(
         self,
         spot: float,
-        dS: float,
         commission_per_share: float,
         base_spread: float,
         spread_std: float,
     ):
         """
-        Synthetic delta hedging PnL implementation
+        Synthetic delta hedging implementation
         """
-        if self.options.empty:
-            if self.shares_owned != 0:
-                self.cash += self.shares_owned * dS
-            return
-
-        if self.shares_owned != 0:
-            self.cash += self.shares_owned * dS
-
-        net_delta = self.get_delta_exposure() - self.shares_owned
-        trade_qty = round(net_delta, 0)
-
-        trade_cashflow = net_delta * spot
-        self.cash -= trade_cashflow
-
-        spread = base_spread + np.random.normal(0, spread_std)
-        spread = max(spread, 0)
-        transaction_cost = trade_qty * (commission_per_share + spread)
-        self.cash -= transaction_cost
+        net_delta = self.get_delta_exposure()
+        trade_qty = -round(net_delta, 0)
 
         self.shares_owned += trade_qty
+        self.cash -= trade_qty * spot
+
+        spread = max(base_spread + np.random.normal(0, spread_std), 0)
+        transaction_cost = abs(trade_qty) * (commission_per_share + (spread / 2))
+        self.cash -= transaction_cost
