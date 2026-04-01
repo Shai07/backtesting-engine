@@ -23,23 +23,17 @@ class Portfolio:
     def get_net_asset_value(self):
         return self.net_asset_value
 
+    def get_shares_owned(self):
+        return self.shares_owned
+
     def get_cash(self):
         return self.cash
 
-    def get_greek_exposure(self, greek: str) -> dict[str, float]:
-        if self.options.empty:
-            return {}
-
-        greek_exposure_map = (
-            self.options.assign(
-                greek_exposure=self.options[greek] * self.options["quantity"] * 100
-            )
-            .groupby("symbol")["greek_exposure"]
-            .sum()
-            .to_dict()
-        )
-
-        return greek_exposure_map
+    def get_greek_exposure(self, greek: str):
+        exposure = self.options[greek].sum()
+        if greek == "delta":
+            exposure += self.shares_owned
+        return exposure
 
     def update_equities(self, equity_orders: pd.DataFrame | None):
         """
@@ -165,9 +159,6 @@ class Portfolio:
             self.options = self.options.loc[~expired_mask]
             self.options = self.options.reset_index(drop=True)
 
-    def get_delta_exposure(self):
-        return self.options["delta"].sum() + self.shares_owned
-
     def hedge_delta(
         self,
         spot: float,
@@ -178,7 +169,7 @@ class Portfolio:
         """
         Synthetic delta hedging implementation
         """
-        net_delta = self.get_delta_exposure()
+        net_delta = self.get_greek_exposure("delta")
         trade_qty = -round(net_delta, 0)
 
         self.shares_owned += trade_qty
