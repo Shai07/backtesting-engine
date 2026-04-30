@@ -44,6 +44,7 @@ class EarningsIVEdgeStrategy(Strategy):
         ] = {}
         self.traded_earnings_dates: set[pd.Timestamp] = set()
         self.sizing_records: list[dict[str, object]] = []
+        self.active_earnings_date: pd.Timestamp | None = None
 
     def process_data(
         self,
@@ -68,7 +69,14 @@ class EarningsIVEdgeStrategy(Strategy):
         else:
             option_spot = close
 
-        orders = self._create_update_orders(options_data, options_positions, option_spot)
+        orders, exited_positions = self._create_exit_and_update_orders(
+            current_date=current_date,
+            options_data=options_data,
+            options_positions=options_positions,
+            spot=option_spot,
+        )
+        if exited_positions:
+            self.active_earnings_date = None
 
         upcoming_earnings = self._next_earnings_date(current_date)
         if upcoming_earnings is None or options_data is None:
@@ -83,7 +91,7 @@ class EarningsIVEdgeStrategy(Strategy):
         if average_edge is None or abs(average_edge) < self.edge_threshold:
             return pd.DataFrame(orders) if orders else None
 
-        active_positions = len(options_positions)
+        active_positions = 0 if exited_positions else len(options_positions)
         straddle_slots = min(
             self.max_straddles_per_event,
             max(0, (self.max_positions - active_positions) // 2),
@@ -112,8 +120,16 @@ class EarningsIVEdgeStrategy(Strategy):
 
         for _ in range(straddle_count):
             for _, option_row in straddle_rows.iterrows():
-                orders.append(self.create_option_order(side, option_spot, option_row))
+                orders.append(
+                    self._create_option_order_with_metadata(
+                        quantity=side,
+                        spot=option_spot,
+                        option_row=option_row,
+                        event_date=upcoming_earnings,
+                    )
+                )
 
+        self.active_earnings_date = upcoming_earnings
         self.traded_earnings_dates.add(upcoming_earnings)
         self.sizing_records.append(
             {
@@ -128,25 +144,79 @@ class EarningsIVEdgeStrategy(Strategy):
                 "straddles_opened": straddle_count,
             }
         )
-
         return pd.DataFrame(orders) if orders else None
 
-    def _create_update_orders(
+    def _create_exit_and_update_orders(
         self,
+        current_date: pd.Timestamp,
         options_data: pd.DataFrame | None,
         options_positions: pd.DataFrame,
         spot: float,
-    ) -> list[pd.Series]:
-        if options_data is None or options_positions.empty:
-            return []
+    ) -> tuple[list[pd.Series], bool]:
+        if options_positions.empty:
+            return [], False
+
+        positions = options_positions.copy()
+        positions_by_optionid = positions.set_index("optionid", drop=False)
+        orders: list[pd.Series] = []
+        should_exit = (
+            self.active_earnings_date is not None and current_date > self.active_earnings_date
+        )
+
+        if should_exit:
+            current_rows = (
+                options_data.set_index("optionid", drop=False)
+                if options_data is not None and not options_data.empty
+                else pd.DataFrame()
+            )
+            for option_id, position_row in positions_by_optionid.iterrows():
+                if option_id in current_rows.index:
+                    option_row = current_rows.loc[option_id]
+                else:
+                    option_row = position_row.copy()
+                    option_row["date"] = current_date
+                orders.append(
+                    self._create_option_order_with_metadata(
+                        quantity=-float(position_row["quantity"]),
+                        spot=spot,
+                        option_row=option_row,
+                        event_date=self.active_earnings_date,
+                    )
+                )
+            return orders, True
+
+        if options_data is None or options_data.empty:
+            return [], False
 
         update_rows = options_data[
             options_data["optionid"].isin(options_positions["optionid"])
         ]
-        return [
-            self.create_option_order(0, spot, option_row)
-            for _, option_row in update_rows.iterrows()
-        ]
+        for _, option_row in update_rows.iterrows():
+            orders.append(
+                self._create_option_order_with_metadata(
+                    quantity=0,
+                    spot=spot,
+                    option_row=option_row,
+                    event_date=self.active_earnings_date,
+                )
+            )
+
+        return orders, False
+
+    def _create_option_order_with_metadata(
+        self,
+        quantity: float,
+        spot: float,
+        option_row: pd.Series,
+        event_date: pd.Timestamp | None,
+    ) -> pd.Series:
+        order = self.create_option_order(quantity, spot, option_row)
+        order["event_date"] = (
+            pd.to_datetime(event_date).normalize()
+            if event_date is not None and not pd.isna(event_date)
+            else pd.NaT
+        )
+        return order
 
     def _next_earnings_date(self, current_date: pd.Timestamp) -> pd.Timestamp | None:
         window_end = current_date + pd.Timedelta(days=self.lookahead_days)
